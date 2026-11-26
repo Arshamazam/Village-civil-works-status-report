@@ -17,6 +17,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -163,6 +164,7 @@ class ReturnController extends Controller
                 'is_completed' => $isCompletedVillage($site),
                 'status' => $ret ? $ret->status : ($isCompletedVillage($site) ? 'completed' : 'active'),
                 'labour' => $ret ? $ret->labour_count : 0,
+                'labour_holiday' => $ret ? $ret->labour_holiday : false,
                 'machinery' => $ret ? $ret->machinery_count : 0,
                 'machinery_types' => $ret ? ($ret->machinery_types ?? []) : [],
                 'work_done' => $ret ? ($ret->work_done ?? '') : '',
@@ -328,6 +330,8 @@ class ReturnController extends Controller
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
             'gps_accuracy_m' => ['nullable', 'numeric'],
+            'labour_holiday' => ['required', 'boolean'],
+            'signature' => ['required', 'image', 'mimes:png', 'max:2048'],
             'remarks' => ['nullable', 'string'],
         ];
 
@@ -388,6 +392,16 @@ class ReturnController extends Controller
             ]);
         }
 
+        $signaturePath = $validated['signature']->storeAs(
+            'returns/'.Carbon::parse($date)->format('Y/m').'/signatures',
+            Str::random(32).'.png',
+            'local'
+        );
+
+        if ($signaturePath === false) {
+            throw new \RuntimeException('Unable to store the daily return signature.');
+        }
+
         $data = [
             'site_id' => $site->id,
             'report_date' => $date,
@@ -400,6 +414,8 @@ class ReturnController extends Controller
             'geofence_ok' => $geofenceOk,
             'status' => $status,
             'labour_count' => $status === 'active' ? (int) $validated['labour_count'] : 0,
+            'labour_holiday' => (bool) $validated['labour_holiday'],
+            'signature_path' => $signaturePath,
             'machinery_count' => $status === 'active' ? (int) $validated['machinery_count'] : 0,
             'machinery_types' => $status === 'active' ? ($validated['machinery_types'] ?? []) : null,
             'work_done' => $status === 'active' ? $validated['work_done'] : ($status === 'completed' ? 'Civil works 100% completed on site.' : null),
@@ -413,6 +429,7 @@ class ReturnController extends Controller
         ];
 
         $before = $dailyReturn ? $dailyReturn->toArray() : null;
+        $previousSignaturePath = $dailyReturn?->signature_path;
 
         if ($dailyReturn) {
             $dailyReturn->update($data);
@@ -422,6 +439,15 @@ class ReturnController extends Controller
                 'site_id' => $site->id,
                 'report_date' => Carbon::parse($date)->toDateString(),
             ], $data));
+        }
+
+        if ($previousSignaturePath && $previousSignaturePath !== $signaturePath) {
+            if (! Storage::disk('local')->delete($previousSignaturePath)) {
+                Log::warning('Previous daily return signature could not be removed.', [
+                    'daily_return_id' => $return->id,
+                    'path' => $previousSignaturePath,
+                ]);
+            }
         }
 
         // Handle uploaded photos (FORM-9, FORM-10)

@@ -72,7 +72,10 @@ class DailyReturnTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Completed (100%)')
-            ->assertSee('Completed Villages');
+            ->assertSee('Completed Villages')
+            ->assertSee('Digital Signature')
+            ->assertSee('Choose from Gallery')
+            ->assertSee('Are labourers on holiday today?');
     }
 
     public function test_field_today_places_immediate_completion_action_after_village_selection(): void
@@ -87,7 +90,10 @@ class DailyReturnTest extends TestCase
             ->assertSee('Select Revenue Village:')
             ->assertSee('Mark ')
             ->assertSee('submitAsCompleted()')
-            ->assertSee('immediately as completed');
+            ->assertSee('immediately as completed')
+            ->assertSee('Digital Signature')
+            ->assertSee('Choose from Gallery')
+            ->assertSee('Are labourers on holiday today?');
 
         $html = $response->getContent();
         $villageSelectorPosition = strpos($html, 'id="villageSelect"');
@@ -116,6 +122,8 @@ class DailyReturnTest extends TestCase
         // Both 0 should fail (FORM-4)
         $response = $this->actingAs($officer)->post("/returns/{$site->id}", [
             'status' => 'active',
+            'labour_holiday' => '0',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'labour_count' => 0,
             'machinery_count' => 0,
             'work_done' => 'Tough tiles 200 Rft',
@@ -133,19 +141,25 @@ class DailyReturnTest extends TestCase
         $tehsil1 = Tehsil::where('name', 'Taunsa')->first() ?: Tehsil::first();
         $site = Site::where('tehsil_id', $tehsil1->id)->where('status', 'ongoing')->first();
 
-        $photo = UploadedFile::fake()->image('work.jpg');
+        Storage::fake('local');
+        $photos = [
+            UploadedFile::fake()->image('work-1.jpg'),
+            UploadedFile::fake()->image('work-2.jpg'),
+        ];
 
         $pktDate = Carbon::now('Asia/Karachi')->toDateString();
 
         $response = $this->actingAs($officer)->post("/returns/{$site->id}", [
             'status' => 'active',
+            'labour_holiday' => '1',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'labour_count' => 12,
             'machinery_count' => 2,
             'machinery_types' => ['excavator', 'mixer'],
             'work_done' => 'Excavation completed and PCC poured.',
             'latitude' => $site->latitude,
             'longitude' => $site->longitude,
-            'photos' => [$photo],
+            'photos' => $photos,
         ]);
 
         // Returns to the same phase / priority and tehsil so the officer can continue with the next village
@@ -157,10 +171,35 @@ class DailyReturnTest extends TestCase
             'labour_count' => 12,
             'machinery_count' => 2,
             'geofence_ok' => 1,
+            'labour_holiday' => 1,
         ]);
 
-        $this->assertDatabaseHas('return_photos', [
-            'latitude' => $site->latitude,
+        $return = DailyReturn::where('site_id', $site->id)->whereDate('report_date', $pktDate)->firstOrFail();
+        $this->assertSame(2, $return->photos()->count());
+        $this->assertNotEmpty($return->signature_path);
+        Storage::disk('local')->assertExists($return->signature_path);
+    }
+
+    public function test_daily_return_cannot_be_submitted_without_a_digital_signature(): void
+    {
+        $officer = User::where('email', 'field.t01@prmsc.gov.pk')->first();
+        $site = Site::where('status', 'ongoing')->first();
+        $officer->tehsils()->sync([$site->tehsil_id]);
+
+        $response = $this->actingAs($officer)->post("/returns/{$site->id}/2026-10-14", [
+            'status' => 'active',
+            'labour_holiday' => '0',
+            'labour_count' => 10,
+            'machinery_count' => 1,
+            'work_done' => 'Work is progressing at site.',
+            'latitude' => $site->latitude ?? 30.71,
+            'longitude' => $site->longitude ?? 70.65,
+        ]);
+
+        $response->assertSessionHasErrors('signature');
+        $this->assertDatabaseMissing('daily_returns', [
+            'site_id' => $site->id,
+            'report_date' => '2026-10-14',
         ]);
     }
 
@@ -175,6 +214,8 @@ class DailyReturnTest extends TestCase
         // Missing reason should fail
         $response = $this->actingAs($officer)->post("/returns/{$site->id}", [
             'status' => 'dormant',
+            'labour_holiday' => '0',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'latitude' => $site->latitude,
             'longitude' => $site->longitude,
             'photos' => [$photo],
@@ -195,6 +236,8 @@ class DailyReturnTest extends TestCase
         // Missing remarks for OT reason should fail
         $response = $this->actingAs($officer)->post("/returns/{$site->id}", [
             'status' => 'dormant',
+            'labour_holiday' => '0',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'reason_id' => $otherReason->id,
             'idle_since' => '2026-10-10',
             'remarks' => '',
@@ -212,11 +255,14 @@ class DailyReturnTest extends TestCase
         $tehsil1 = Tehsil::where('name', 'Taunsa')->first() ?: Tehsil::first();
         $site = Site::where('tehsil_id', $tehsil1->id)->where('status', 'ongoing')->first();
 
+        Storage::fake('local');
         $photo = UploadedFile::fake()->image('site.jpg');
 
         // 10 km away (far outside 500m geofence) with empty remarks
         $response = $this->actingAs($officer)->post("/returns/{$site->id}", [
             'status' => 'active',
+            'labour_holiday' => '0',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'labour_count' => 10,
             'machinery_count' => 1,
             'work_done' => 'Work ongoing',
@@ -231,6 +277,8 @@ class DailyReturnTest extends TestCase
         // With remark, it should succeed but record geofence_ok = false (FORM-8)
         $response = $this->actingAs($officer)->post("/returns/{$site->id}", [
             'status' => 'active',
+            'labour_holiday' => '0',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'labour_count' => 10,
             'machinery_count' => 1,
             'work_done' => 'Work ongoing',
@@ -287,8 +335,12 @@ class DailyReturnTest extends TestCase
         $site = Site::first();
         $officer->tehsils()->sync([$site->tehsil_id]);
 
+        Storage::fake('local');
+
         $response = $this->actingAs($officer)->post("/returns/{$site->id}/2026-10-14", [
             'status' => 'active',
+            'labour_holiday' => '0',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'physical_progress' => 85,
             'labour_count' => 12,
             'machinery_count' => 2,
@@ -308,8 +360,12 @@ class DailyReturnTest extends TestCase
         $site = Site::first();
         $officer->tehsils()->sync([$site->tehsil_id]);
 
+        Storage::fake('local');
+
         $response = $this->actingAs($officer)->post("/returns/{$site->id}/2026-10-14", [
             'status' => 'completed',
+            'labour_holiday' => '0',
+            'signature' => UploadedFile::fake()->image('signature.png'),
             'latitude' => $site->latitude ?? 30.71,
             'longitude' => $site->longitude ?? 70.65,
             'remarks' => 'Civil works completed on site.',

@@ -54,7 +54,7 @@
 
     <!-- Clean, Simple Return Form -->
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8">
-        <form method="POST" action="{{ route('field.save', ['site' => $site->id, 'date' => $date]) }}" enctype="multipart/form-data">
+        <form method="POST" action="{{ route('field.save', ['site' => $site->id, 'date' => $date]) }}" enctype="multipart/form-data" x-init="initializeSignaturePad($el)">
             @csrf
 
             <!-- Physical Progress Percentage Selector -->
@@ -121,6 +121,25 @@
                     </button>
                 </div>
                 <input type="hidden" name="status" :value="status">
+                <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Are labourers on holiday today? <span class="text-rose-500">*</span>
+                    </label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                            <input type="radio" name="labour_holiday" value="0" required
+                                   {{ old('labour_holiday', $dailyReturn->labour_holiday ?? false) ? '' : 'checked' }}
+                                   class="text-emerald-600 focus:ring-emerald-500">
+                            No
+                        </label>
+                        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                            <input type="radio" name="labour_holiday" value="1" required
+                                   {{ old('labour_holiday', $dailyReturn->labour_holiday ?? false) ? 'checked' : '' }}
+                                   class="text-emerald-600 focus:ring-emerald-500">
+                            Yes
+                        </label>
+                    </div>
+                </div>
                 <div x-show="status === 'completed'" x-cloak class="mt-3 p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs space-y-1">
                     <div class="font-bold text-emerald-900">Site marked 100% physically complete.</div>
                     <p class="text-emerald-800">
@@ -212,16 +231,20 @@
             <div class="mt-6 pt-5 border-t border-slate-100 space-y-4">
                 <div class="flex items-center justify-between">
                     <label class="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                        Attach Site Photo
+                        Add Site Photos
                     </label>
-                    <span class="text-[11px] text-slate-400">Optional / Camera upload</span>
+                    <span class="text-[11px] text-slate-400">Optional · Up to 5</span>
                 </div>
 
                 <div class="flex items-center gap-3">
                     <label class="flex-1 flex items-center justify-center px-4 py-3 border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl cursor-pointer bg-slate-50 hover:bg-emerald-50/40 transition">
                         <svg class="w-5 h-5 text-emerald-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        <span class="text-xs font-bold text-slate-700">Take Photo or Choose File</span>
-                        <input type="file" name="photos[]" multiple accept="image/*" capture="environment" class="hidden" @change="handlePhotoUpload($event)">
+                        <span class="text-xs font-bold text-slate-700">Take Photo</span>
+                        <input type="file" name="photos[]" multiple accept="image/*" capture="environment" class="sr-only" @change="handlePhotoUpload($event)">
+                    </label>
+                    <label class="flex-1 flex items-center justify-center px-4 py-3 border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl cursor-pointer bg-slate-50 hover:bg-emerald-50/40 transition">
+                        <span class="text-xs font-bold text-slate-700">Choose from Gallery</span>
+                        <input type="file" name="photos[]" multiple accept="image/*" class="sr-only" @change="handlePhotoUpload($event)">
                     </label>
                 </div>
 
@@ -231,6 +254,7 @@
                         <img :src="url" class="w-16 h-16 rounded-lg object-cover border border-slate-200 shadow-sm">
                     </template>
                 </div>
+                @include('field.partials.signature-pad')
 
                 <!-- GPS Location Pill -->
                 <div class="flex items-center justify-between bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-600">
@@ -298,11 +322,10 @@ function dailyReturnForm(config) {
         },
 
         handlePhotoUpload(event) {
-            const files = event.target.files;
-            this.previewUrls = [];
-            for (let i = 0; i < files.length && i < 5; i++) {
-                this.previewUrls.push(URL.createObjectURL(files[i]));
-            }
+            this.previewUrls.forEach((url) => URL.revokeObjectURL(url));
+            const files = Array.from(event.target.form.querySelectorAll('input[name="photos[]"]'))
+                .flatMap((input) => Array.from(input.files));
+            this.previewUrls = files.slice(0, 5).map((file) => URL.createObjectURL(file));
         }
     };
 }

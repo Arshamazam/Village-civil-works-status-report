@@ -177,7 +177,7 @@
 
             <!-- Form DSM-1 Submission Box -->
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-7">
-                <form :action="'/returns/' + currentVillage.id + '/' + date" method="POST" enctype="multipart/form-data" class="space-y-6">
+                <form :action="'/returns/' + currentVillage.id + '/' + date" method="POST" enctype="multipart/form-data" class="space-y-6" x-init="initializeSignaturePad($el)">
                     @csrf
 
                     <!-- PHYSICAL PROGRESS PERCENTAGE BAR & SELECTOR -->
@@ -249,6 +249,26 @@
                             </button>
                         </div>
                         <input type="hidden" name="status" :value="formStatus">
+
+                        <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                                Are labourers on holiday today? <span class="text-rose-500">*</span>
+                            </label>
+                            <div class="grid grid-cols-2 gap-3">
+                                <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                                    <input type="radio" name="labour_holiday" value="0" required
+                                           :checked="!formLabourHoliday" @change="formLabourHoliday = false"
+                                           class="text-emerald-600 focus:ring-emerald-500">
+                                    No
+                                </label>
+                                <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                                    <input type="radio" name="labour_holiday" value="1" required
+                                           :checked="formLabourHoliday" @change="formLabourHoliday = true"
+                                           class="text-emerald-600 focus:ring-emerald-500">
+                                    Yes
+                                </label>
+                            </div>
+                        </div>
 
                         <!-- Completed Info Box -->
                         <div x-show="formStatus === 'completed'" class="mt-3 p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs space-y-1">
@@ -382,11 +402,22 @@
                     <div class="pt-4 border-t border-slate-100">
                         <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1 flex items-center justify-between">
                             <span>Attach Site Photograph:</span>
-                            <span class="text-[10px] text-slate-400 font-semibold uppercase">Optional</span>
+                            <span class="text-[10px] text-slate-400 font-semibold uppercase">Optional · Up to 5</span>
                         </label>
-                        <input type="file" name="photos[]" accept="image/*" capture="environment"
-                               class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label class="flex items-center justify-center px-4 py-3 border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl cursor-pointer bg-slate-50 hover:bg-emerald-50/40 transition">
+                                <span class="text-xs font-bold text-slate-700">Take Photo</span>
+                                <input type="file" name="photos[]" multiple accept="image/*" capture="environment"
+                                       class="sr-only">
+                            </label>
+                            <label class="flex items-center justify-center px-4 py-3 border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl cursor-pointer bg-slate-50 hover:bg-emerald-50/40 transition">
+                                <span class="text-xs font-bold text-slate-700">Choose from Gallery</span>
+                                <input type="file" name="photos[]" multiple accept="image/*" class="sr-only">
+                            </label>
+                        </div>
                     </div>
+
+                    @include('field.partials.signature-pad')
 
                     <!-- Fallback Coordinates -->
                     <input type="hidden" name="latitude" :value="currentVillage.lat">
@@ -448,6 +479,7 @@ function cascadingReturnForm(config) {
         // Form fields
         formPhysicalProgress: 0,
         formStatus: 'active',
+        formLabourHoliday: false,
         formLabour: 5,
         formMachinery: 1,
         formMachineryTypes: ['Excavator'],
@@ -534,6 +566,7 @@ function cascadingReturnForm(config) {
                     this.formStatus = (this.currentVillage.status === 'dormant') ? 'dormant' : 'active';
                 }
                 this.formLabour = this.currentVillage.is_submitted ? this.currentVillage.labour : 6;
+                this.formLabourHoliday = Boolean(this.currentVillage.labour_holiday);
                 this.formMachinery = this.currentVillage.is_submitted ? this.currentVillage.machinery : 1;
                 this.formMachineryTypes = (this.currentVillage.machinery_types && this.currentVillage.machinery_types.length > 0) ? this.currentVillage.machinery_types : ['Excavator'];
                 this.formWorkDone = this.currentVillage.work_done || 'Brick masonry, PCC and civil works in progress';
@@ -558,7 +591,7 @@ function cascadingReturnForm(config) {
             this.$nextTick(() => {
                 const form = document.querySelector('form[action*="/returns/"]');
                 if (form) {
-                    form.submit();
+                    form.requestSubmit();
                 }
             });
         }
