@@ -328,6 +328,14 @@ class DashboardController extends Controller
         $payload = ! empty($filters) ? $reportBuilder->applyFilters($fullPayload, $filters) : $fullPayload;
 
         $rows = collect($payload['register_rows'] ?? []);
+
+        // The register only covers sites under active execution. Without this, sites still in
+        // tendering/procurement or administratively suspended never appear in any downloaded
+        // sheet, which reads as the sheet being incomplete / missing villages.
+        if (empty($filters['phase'])) {
+            $rows = $rows->concat($this->nonExecutionRegisterRows($date, $filters));
+        }
+
         $filename = 'PRSWSSP_Progress_Data_'.$date.($format === 'csv' ? '.csv' : '.xlsx');
 
         try {
@@ -382,6 +390,13 @@ class DashboardController extends Controller
         $all = collect($payload['register_rows'] ?? []);
         $noProgressRows = $all->filter(fn ($r) => in_array($r['day_status'] ?? '', ['dormant', 'not_reported']) || ((float) ($r['physical_progress'] ?? 0) <= 0 && (int) ($r['labour'] ?? 0) === 0))->values();
 
+        // Sites still in tendering/procurement or administratively suspended have no progress
+        // either, and belong in this sheet too — otherwise they silently never appear in any
+        // downloadable sheet.
+        if (empty($filters['phase'])) {
+            $noProgressRows = $noProgressRows->concat($this->nonExecutionRegisterRows($date, $filters))->values();
+        }
+
         $filename = 'PRSWSSP_No_Progress_Sites_'.$date.($format === 'csv' ? '.csv' : '.xlsx');
 
         try {
@@ -422,6 +437,59 @@ class DashboardController extends Controller
                 'Content-Type' => 'text/csv; charset=UTF-8',
             ]);
         }
+    }
+
+    /**
+     * Rows for sites outside the execution register (tendering/procurement or administratively
+     * suspended) in the same shape as a register row, so sheet downloads can include every site
+     * rather than only those under active civil-works execution.
+     *
+     * @param  array{tehsil?: string|null, contractor?: string|null, village?: string|null}  $filters
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    private function nonExecutionRegisterRows(string $date, array $filters = []): \Illuminate\Support\Collection
+    {
+        $query = Site::whereIn('status', ['tendering', 'suspended'])
+            ->with(['tehsil', 'phase', 'package', 'priority', 'contractor']);
+
+        if (! empty($filters['tehsil'])) {
+            $query->whereHas('tehsil', fn ($q) => $q->where('name', $filters['tehsil']));
+        }
+        if (! empty($filters['contractor'])) {
+            $query->whereHas('contractor', fn ($q) => $q->where('name', $filters['contractor']));
+        }
+        if (! empty($filters['village'])) {
+            $query->where('village_name', 'like', '%'.$filters['village'].'%');
+        }
+
+        return $query->get()->map(function ($site) use ($date) {
+            $isPhase0 = $site->phase && (str_contains(strtolower($site->phase->name), '0') || str_contains(strtolower($site->phase->code ?? ''), '0'));
+            $statusLabel = $site->status === 'tendering' ? 'Tendering / Procurement' : 'Suspended';
+
+            return [
+                'site_code' => $site->site_code,
+                'village' => $site->village_name,
+                'tehsil' => $site->tehsil->name ?? '',
+                'package' => $site->package->code ?? '—',
+                'phase_abbr' => $isPhase0 ? 'Ph-0' : 'Pilot',
+                'group_name' => strtoupper($site->status),
+                'priority_code' => (string) ($site->priority->code ?? ''),
+                'contractor' => $site->contractor->name ?? 'Unassigned',
+                'day_status' => $site->status,
+                'status_label' => $statusLabel,
+                'physical_progress' => $site->physical_progress ?? 0,
+                'labour' => 0,
+                'machinery' => 0,
+                'idle_days' => 0,
+                'top_level_reason' => $statusLabel,
+                'reason_code' => '',
+                'expected_completion_date' => $site->expected_completion_date?->toDateString(),
+                'remarks' => $site->status === 'tendering'
+                    ? 'Site under tendering / procurement — civil works not yet started.'
+                    : 'Site suspended — not currently under execution.',
+                'report_date' => $date,
+            ];
+        });
     }
 
     /**

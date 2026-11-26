@@ -340,6 +340,69 @@ class DashboardTest extends TestCase
         );
     }
 
+    public function test_export_data_sheet_includes_tendering_and_suspended_sites(): void
+    {
+        \Maatwebsite\Excel\Facades\Excel::fake();
+
+        Site::create([
+            'site_code' => 'PLT-002',
+            'village_name' => 'Basti Tendering',
+            'phase_id' => $this->site->phase_id,
+            'tehsil_id' => $this->site->tehsil_id,
+            'status' => 'tendering',
+        ]);
+        Site::create([
+            'site_code' => 'PLT-003',
+            'village_name' => 'Basti Suspended',
+            'phase_id' => $this->site->phase_id,
+            'tehsil_id' => $this->site->tehsil_id,
+            'status' => 'suspended',
+        ]);
+
+        $this->actingAs($this->hqManager)
+            ->get("/dashboard/export/sheet?date={$this->reportDate}")
+            ->assertStatus(200);
+
+        \Maatwebsite\Excel\Facades\Excel::assertDownloaded('PRSWSSP_Progress_Data_'.$this->reportDate.'.xlsx', function (\App\Exports\DailyProgressExport $export) {
+            $villages = $export->collection()->pluck('village');
+
+            return $villages->contains('Basti Buzdar')
+                && $villages->contains('Basti Tendering')
+                && $villages->contains('Basti Suspended');
+        });
+    }
+
+    public function test_export_no_progress_includes_tendering_and_suspended_sites(): void
+    {
+        \Maatwebsite\Excel\Facades\Excel::fake();
+
+        Site::create([
+            'site_code' => 'PLT-002',
+            'village_name' => 'Basti Tendering',
+            'phase_id' => $this->site->phase_id,
+            'tehsil_id' => $this->site->tehsil_id,
+            'status' => 'tendering',
+        ]);
+        Site::create([
+            'site_code' => 'PLT-003',
+            'village_name' => 'Basti Suspended',
+            'phase_id' => $this->site->phase_id,
+            'tehsil_id' => $this->site->tehsil_id,
+            'status' => 'suspended',
+        ]);
+
+        $this->actingAs($this->hqManager)
+            ->get("/dashboard/export/no-progress?date={$this->reportDate}")
+            ->assertStatus(200);
+
+        \Maatwebsite\Excel\Facades\Excel::assertDownloaded('PRSWSSP_No_Progress_Sites_'.$this->reportDate.'.xlsx', function (\App\Exports\NoProgressSitesExport $export) {
+            $villages = $export->collection()->pluck('village');
+
+            return $villages->contains('Basti Tendering')
+                && $villages->contains('Basti Suspended');
+        });
+    }
+
     public function test_details_excel_downloads_file(): void
     {
         $res = $this->actingAs($this->hqManager)
